@@ -3,13 +3,8 @@ title: "Generalized Additive Models (GAMs)"
 author: "AliMirzaei"
 date: "11/4/2022"
 output: html_document
-# font-import: http://fonts.googleapis.com/css?family=Roboto|Open+Sans|Stalemate|Alex+Brush
----
+Note that code in subsequent files assumes that previous files have had all the code run and those objects are in the current R environment.For those in the workshop, after downloading this repo and unzipping the files to an appropriate location on your own machine, open the RStudio project inside and, once your project is open, open each of the notebook files in the notebooks folder. They contain condensed code and exercises related to the main document linked above.
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-Sys.setlocale(category = "LC_ALL", locale = "persian")
-```
 
 In LM we model the mean of data as a sum of linear terms:
 
