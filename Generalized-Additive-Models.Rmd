@@ -1,0 +1,517 @@
+---
+title: "Generalized Additive Models (GAMs)"
+author: "AliMirzaei"
+date: "11/4/2022"
+output: html_document
+# font-import: http://fonts.googleapis.com/css?family=Roboto|Open+Sans|Stalemate|Alex+Brush
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale(category = "LC_ALL", locale = "persian")
+```
+
+In LM we model the mean of data as a sum of linear terms:
+
+$$y_i = \beta_0 +\sum_j \color{red}{ \beta_j x_{ji}} +\epsilon_i$$
+A GAM is a sum of _smooth functions_ or _smooths_
+
+$$y_i = \beta_0 + \sum_j \color{red}{s_j(x_{ji})} + \epsilon_i$$
+where $\epsilon_i \sim N(0, \sigma^2)$, $y_i \sim \text{Normal}$
+
+## Fitting a GAM in R
+```r
+model <- gam(y ~ s(x1) + s(x2) + te(x3, x4), # formuala describing model
+             data = my_data_frame,           # your data
+             method = 'REML',                # or 'ML'
+             family = gaussian)              # or something more exotic
+```
+
+`s()` terms are smooths of one or more variables
+
+`te()` terms are the smooth equivalent of *main effects + interactions*
+
+## Smooth interactions
+
+Two ways to fit smooth interactions
+
+1. Bivariate (or higher order) thin plate splines
+    * `s(x, z, bs = 'tp')`
+    * Isotropic; single smoothness parameter for the smooth
+	* Sensitive to scales of `x` and `z`
+2. Tensor product smooths
+    * Separate marginal basis for each smooth, separate smoothness parameters
+	* Invariant to scales of `x` and `z`
+	* Use for interactions when variables are in different units
+	* `te(x, z)`
+
+## Tensor product smooths
+
+There are multiple ways to build tensor products in *mgcv*
+
+1. `te(x, z)`
+2. `t2(x, z)`
+3. `s(x) + s(z) + ti(x, z)`
+
+`te()` is the most general form but not usable in `gamm4::gamm4()` or *brms*
+
+`t2()` is an alternative implementation that does work in `gamm4::gamm4()` or *brms*
+
+`ti()` fits pure smooth interactions; where the main effects of `x` and `z` have been removed from the basis
+
+## Type of smooths
+
+The type of smoother is controlled by the `bs` argument (think *basis*)
+
+The default is a low-rank thin plate spline `bs = 'tp'`
+
+Many others available
+
+
+
+* Cubic splines `bs = 'cr'`
+* P splines `bs = 'ps'`
+* Cyclic splines `bs = 'cc'` or `bs = 'cp'`
+* Adaptive splines `bs = 'ad'`
+* Random effect `bs = 're'`
+* Factor smooths `bs = 'fs'`
+* Duchon splines `bs = 'ds'`
+* Spline on the sphere `bs = 'sos'`
+* MRFs `bs = 'mrf'`
+* Soap-film smooth `bs = 'so'`
+* Gaussian process `bs = 'gp'`
+
+## Factor smooth interactions
+
+Two ways for factor smooth interactions
+
+1. `by` variable smooths
+    * entirely separate smooth function for each level of the factor
+	* each has it's own smoothness parameter
+	* centred (no group means) so include factor as a fixed effect
+	* `y ~ f + s(x, by = f)`
+2. `bs = 'fs'` basis
+    * smooth function for each level of the function
+	* share a common smoothness parameter
+	* fully penalized; include group means
+	* closer to random effects
+	* `y ~ s(x, f, bs = 'fs')`
+
+
+## A bestiary of conditional distributions
+
+A GAM is just a fancy GLM
+
+Simon Wood & colleagues (2016) have extended the *mgcv* methods to some non-exponential family distributions
+
+
+* `binomial()`
+* `poisson()`
+* `quasipoisson()`
+* `Gamma()`
+* `inverse.gaussian()`
+* `nb()`
+* `tw()`
+* `mvn()`
+* `multinom()`
+* `betar()`
+* `scat()`
+* `gaulss()`
+* `ziplss()`
+* `twlss()`
+* `cox.ph()`
+* `gamals()`
+* `ocat()`
+
+## Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+if(!require('dplyr')) install.packages('dplyr')
+if(!require('corrplot')) install.packages('corrplot')
+if(!require('mgcv')) install.packages('mgcv')
+if(!require('plotly')) install.packages('plotly')
+if(!require('GGally')) install.packages('GGally')
+if(!require('gratia')) install.packages('gratia')
+if(!require('ggeffects')) install.packages('ggeffects')
+if(!require('scico')) install.packages('scico')
+if(!require('beepr')) install.packages('beepr')
+if(!require('purrr')) install.packages('purrr')
+if(!require('tibble')) install.packages('tibble')
+if(!require('visibly')) devtools::install_github('m-clark/visibly', upgrade = "never")
+if(!require('tidyext')) devtools::install_github('m-clark/tidyext', upgrade = "never")
+```
+
+## Dataset
+
+
+```{r dataset, echo=FALSE, warning=FALSE}
+# df <- read.csv(paste0(here::here(),'/esf98_tag_viloation(1).csv'), encoding="UTF-8")
+
+df <- read.csv('C:/Users/Traffic/Desktop/SOHBATZADEH/esf98_tag_viloation (2).csv', encoding="UTF-8")
+
+df <- df %>% mutate_if(is.character, as.factor) %>% 
+  relocate(accident)
+
+df$high_holiday <- ifelse(df$TAG ==  "تعطيلي بلند مدت", 1 , 0)
+df$low_holiday <- ifelse(df$TAG ==  "تعطيلي کوتاه مدت", 1 , 0)
+df$holiday <- ifelse(df$TAG ==  "تعطيل", 1 , 0)
+df$normal <- ifelse(df$TAG ==  "عادي", 1 , 0)
+
+cols <- c('IS_HOLIDAY'
+           , 'high_holiday', 'low_holiday', 'holiday', 'normal'
+          )
+df[cols] <- lapply(df[cols], factor)
+# df <- df %>% mutate(c.day = 1:nrow(df))
+```
+```{r data}
+glimpse(df)
+```
+
+## Exploratory Data Analysis
+```{r EDA, message=FALSE, warning=FALSE}
+# knitr::kable(df %>% tidyext::num_by(vars(-JDATE,-JYEAR, -TAG, -JMONTH, -JDAY, -JDATE, -IS_HOLIDAY, - DESCRIPTION, -h_holiday, -l_holiday)), align = 'c')
+
+knitr::kable(df %>% tidyext::cat_by(main_var = TAG, digits = 2), align = 'c')
+knitr::kable(df %>% tidyext::cat_by(main_var = IS_HOLIDAY, digits = 2), align = 'c')
+
+smooth <- function(data, mapping, ptcol, ptalpha=1, ptsize=1, linecol, ...) {
+  p <- ggplot(data = data, mapping = mapping) +
+    geom_point(color=ptcol, alpha=ptalpha, size=ptsize) +
+    geom_smooth(color=linecol, ...)
+  p
+}
+
+# ggpairs(df %>% dplyr::select(-JDATE,-JYEAR, -TAG,
+#                       -JMONTH, -JDAY, -JDATE,
+#                       -IS_HOLIDAY, -DESCRIPTION) %>% 
+#           rename(DIST_VIOL = DISTANCE_VIOLATIONS,
+#                  HVY_VEH = HEAVY_VEHICLES,
+#                  SPD_VIOL = SPEED_VIOLATIONS,
+#                  TTL_VEH = TOTAL_VEHICLES),
+#   lower = list(
+#     continuous = GGally::wrap(
+#       smooth,
+#       ptalpha = .25,
+#       ptcol = '#D55E00',
+#       ptsize = 1,
+#       linecol = '#03b3ff',
+#       method = 'loess',
+#       se = F,
+#       lwd = .5
+#     )
+#   ),
+#   diag = list(continuous = GGally::wrap(
+#     'densityDiag', color = 'gray50', lwd = .25
+#   )),
+#   upper = list(continuous = wrap("cor", size = 2.8)),
+#   axisLabels = "none") + 
+#   theme(strip.text.x = element_text(angle = 90, hjust = 0),
+#            strip.text.y = element_text(angle = 0, hjust = 0),
+#         strip.background.x = element_blank(),
+#         strip.background.y = element_blank())
+
+corrplot(
+  cor(df %>% select(-JDATE,-JYEAR, -TAG,
+                    -JMONTH, -JDAY, -JDATE,
+                    -IS_HOLIDAY, -DESCRIPTION,
+                    -h_holiday, -l_holiday)),
+  method = 'square',
+  type = 'upper',
+  tl.col = 'black',
+  tl.cex = 0.75, tl.srt = 90,
+  col = colorRampPalette(c('purple', 'dark green'))(200)
+)
+```
+
+<!-- # Model 1 -->
+
+<!-- ```{r smooth_parameter, fig.width=10, warning=FALSE} -->
+<!-- fits = purrr::map_df( -->
+<!--   c(0.00001, 0.01, 1, 100, 1000000), -->
+<!--   function(p) -->
+<!--     tibble(sp = p, -->
+<!--            JDATE = df$JDATE, -->
+<!--            fits = fitted( -->
+<!--              gam(accident  ~ s(SPEED_VIOLATIONS, k = 30) + -->
+<!--                    s(DISTANCE_VIOLATIONS)  -->
+<!--                  ,data = df, family = 'poisson', sp = p) -->
+<!--            )) -->
+<!-- ) %>% -->
+<!--   mutate(sp = factor(sp, labels = c(0.00001, 0.01, 1, 100, 1000000),)) -->
+
+
+
+<!-- plot_ly(data = df) %>% -->
+<!--   add_markers( x = ~JDATE, -->
+<!--                y = ~accident , -->
+<!--                marker = list(color = '#D55E00', opacity = .2), -->
+<!--                showlegend = F) %>% -->
+<!--   add_lines( x = ~JDATE, y = ~ fits, color =  ~ sp, data = fits)%>% -->
+<!--   theme_plotly() %>% config(displayModeBar = T) -->
+<!-- ``` -->
+
+```{r 3dscatter}
+
+```
+
+# Modele 1
+
+```{r Modeling, message=FALSE, warning=FALSE}
+system.time({mod_gam1 = gam(accident  ~
+                             s(SPEED_VIOLATIONS, k = 12, bs = 'tp') +
+                             s(DISTANCE_VIOLATIONS, k = 12, bs = 'tp') +
+                             # s(SPEED_VIOLATIONS, DISTANCE_VIOLATIONS,
+                             #   k = 12, bs = 'tp') +
+                             # ti(police_enforcment, holiday, bs = 'fs')+
+                             # s(police_enforcment, k = 12) +
+                             s(JMONTH, bs = 'fs', k = 12) +
+                             #ti(SPEED_VIOLATIONS, JMONTH, bs = 'fs', k = 12) +
+                             # s(TAG, bs = 'fs', k = 12) +
+                             # s(class4, bs = 'cr') +
+                             # s(avg_class1_speed, k = 12) +
+                             # s(avg_class3_speed, k = 12) +
+                              ti(class4, IS_HOLIDAY, bs = 'fs') +
+                             ti(police_enforcment, IS_HOLIDAY, bs = 'fs') +
+                             ti(police_enforcment, JMONTH, bs = 'fs')
+                              #ti(SPEED_VIOLATIONS, IS_HOLIDAY, bs = 'fs')
+                           ,data = df, select = T, family = 'poisson'
+                           # ,method = 'REML'
+                           )
+# beepr::beep(2)
+})
+summary(mod_gam1)
+# plot_gam_check(mod_gam, scatter = TRUE)
+```
+# Modele 2
+
+```{r Modeling, message=FALSE, warning=FALSE}
+system.time({mod_gam2 = gam(accident  ~
+                             s(SPEED_VIOLATIONS, k = 12, bs = 'tp') +
+                             s(DISTANCE_VIOLATIONS, k = 12, bs = 'tp') +
+                             # s(SPEED_VIOLATIONS, DISTANCE_VIOLATIONS,
+                             #   k = 12, bs = 'tp') +
+                             # ti(police_enforcment, holiday, bs = 'fs')+
+                             # s(police_enforcment, k = 12) +
+                             s(JMONTH, bs = 'fs', k = 12) +
+                             #ti(SPEED_VIOLATIONS, JMONTH, bs = 'fs', k = 12) +
+                             # s(TAG, bs = 'fs', k = 12) +
+                             # s(class4, bs = 'cr') +
+                             # s(avg_class1_speed, k = 12) +
+                             # s(avg_class3_speed, k = 12) +
+                              ti(class4, IS_HOLIDAY, bs = 'fs') +
+                             ti(police_enforcment, IS_HOLIDAY, bs = 'fs') +
+                             ti(police_enforcment, JMONTH, bs = 'fs') +
+                             ti(class2_speed, IS_HOLIDAY, bs = 'fs')
+                           ,data = df, select = T, family = 'poisson'
+                           # ,method = 'REML'
+                           )
+# beepr::beep(2)
+})
+summary(mod_gam2)
+# plot_gam_check(mod_gam, scatter = TRUE)
+```
+
+```{r aic}
+AIC(mod_gam1, mod_gam2)
+```
+
+```{r acf}
+res <- pred$accident - pred$value...34
+forecast::Acf(res)
+```
+```{r fitted plot, fig.width=9}
+pred1 <- as_tibble(predict(mod_gam1, newdata = df, se.fit = F,
+                          type = 'response'))
+pred2 <- as_tibble(predict(mod_gam2, newdata = df, se.fit = F,
+                          type = 'response'))
+
+pred <- bind_cols(df, pred1, pred2)
+# %>%
+#   mutate(upr = as.numeric(fit + 1.96*se.fit), lwr = as.numeric(fit - 1.96*se.fit))
+
+plot_ly(data = pred, x = ~JDATE,
+        y = ~accident, type = 'scatter', mode = 'lines',
+        hoverinfo = 'text',
+        hovertext = paste(
+          "Date: ", pred$JDATE,
+          "<br>Accident: ", pred$accident,
+          "<br>GAM1: ", round(pred$value...33, digits = 0),
+          "<br>GAM2: ", round(pred$value...34, digits = 0),
+          "<br>Distance violations: ", pred$DISTANCE_VIOLATIONS,
+          "<br>Police violations: ", pred$SPEED_VIOLATIONS,
+          "<br>Police enforcment: ", pred$police_enforcment,
+          "<br>Is Holiday: ", pred$IS_HOLIDAY,
+          "<br>TAG: ", pred$TAG
+        ),
+        name = 'Data',
+        yaxis = 'y') %>% 
+  add_lines(x = ~JDATE,
+            y = ~value...33, name='GAM1', 
+            line=list(color="red", width=2)) %>%
+  add_lines(x = ~JDATE,
+            y = ~value...34, name='GAM2', 
+            line=list(color="yellow", width=2)) %>% 
+  add_trace(data = pred, x = ~JDATE,
+        y = ~SPEED_VIOLATIONS, type = 'scatter', mode = 'lines',
+        hoverinfo = 'text',
+        hovertext = paste(
+          "Date: ", pred$JDATE,
+          "<br>Accident: ", pred$accident,
+          "<br>GAM1: ", round(pred$value...33, digits = 0),
+          "<br>GAM2: ", round(pred$value...34, digits = 0),
+          "<br>Distance violations: ", pred$DISTANCE_VIOLATIONS,
+          "<br>TOTAL VEHICLES: ", pred$TOTAL_VEHICLES,
+          "<br>Police violations: ", pred$SPEED_VIOLATIONS,
+          "<br>Police enforcment: ", pred$police_enforcment,
+          "<br>Is Holiday: ", pred$IS_HOLIDAY,
+          "<br>TAG: ", pred$TAG
+        ),
+        name = 'speed', yaxis = 'y2') %>% 
+  layout(yaxis2 = list(overlaying = "y", side = "right",title="\u0641\u0648\u062a\u06cc"))
+  # add_ribbons(x = ~JDATE, ymin = ~lwr, ymax = ~upr, 
+  #             name='GAM 95% CI',
+  #             line=list(color="#366092", opacity=0.4,
+  #                       width=0)) %>% 
+  # layout(legend = list(orientation = 'h', y = -0.25))
+
+# plot_ly(data = pred, x = ~JDATE,
+#         y = ~SPEED_VIOLATIONS, type = 'scatter', mode = 'lines',
+#         hoverinfo = 'text',
+#         hovertext = paste(
+#           "Date: ", pred$JDATE,
+#           "<br>Accident: ", pred$accident,
+#           "<br>GAM1: ", round(pred$value...33, digits = 0),
+#           "<br>GAM2: ", round(pred$value...34, digits = 0),
+#           "<br>Distance violations: ", pred$DISTANCE_VIOLATIONS,
+#           "<br>TOTAL VEHICLES: ", pred$TOTAL_VEHICLES,
+#           "<br>Police violations: ", pred$SPEED_VIOLATIONS,
+#           "<br>Police enforcment: ", pred$police_enforcment,
+#           "<br>Is Holiday: ", pred$IS_HOLIDAY,
+#           "<br>TAG: ", pred$TAG
+#         ),
+#         name = 'Data')
+
+
+```
+
+<!-- # ```{r plot, fig.width=9} -->
+<!-- # plot_ly(data = df, x = ~SPEED_VIOLATIONS, -->
+<!-- #         y = ~DISTANCE_VIOLATIONS, z =~accident)  -->
+<!-- # ``` -->
+
+<!-- # Modele 2 -->
+<!-- ```{r Modeling2, message=FALSE, warning=FALSE} -->
+<!-- system.time({mod_gam2 = gam(accident  ~ s(SPEED_VIOLATIONS, k = 12) +  -->
+<!--                              s(DISTANCE_VIOLATIONS, k = 12) + -->
+<!--                              # s(police_enforcment, k = 12) + -->
+<!--                              s(JMONTH) + -->
+<!--                              s(avg_class2_speed, k = 12) + -->
+<!--                              s(avg_class3_speed, k = 12) + -->
+<!--                              ti(class4, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              ti(HEAVY_VEHICLES, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              # ti(police_enforcment, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              ti(police_enforcment, JMONTH, bs = 'fs') -->
+<!--                            ,data = df, select = T, family = 'poisson') -->
+<!-- beepr::beep(2) -->
+<!-- }) -->
+<!-- summary(mod_gam2) -->
+<!-- # plot_gam_check(mod_gam2, scatter = TRUE) -->
+<!-- ``` -->
+<!-- # Modele 3 -->
+<!-- ```{r Modeling3, message=FALSE, warning=FALSE} -->
+<!-- system.time({mod_gam3 = gam(accident  ~ -->
+<!--                               s(class1_speed, k = 12) +  -->
+<!--                              s(DISTANCE_VIOLATIONS, k = 12) + -->
+<!--                              # s(police_enforcment, k = 12) + -->
+<!--                              s(JMONTH) + -->
+<!--                              s(avg_class2_speed, k = 12) + -->
+<!--                              s(avg_class3_speed, k = 12) + -->
+<!--                              # ti(class4, TAG, bs = 'fs') + -->
+<!--                              ti(class2_speed, class2, k = 12) + -->
+<!--                              s(DISTANCE_VIOLATIONS, class1, k = 12) + -->
+<!--                              # ti(HEAVY_VEHICLES, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              s(police_enforcment, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              ti(police_enforcment, JMONTH, bs = 'fs') -->
+<!--                            ,data = df, select = T, family = 'poisson') -->
+<!-- beepr::beep(2) -->
+<!-- }) -->
+<!-- summary(mod_gam3) -->
+<!-- # plot_gam_check(mod_gam3, scatter = TRUE) -->
+<!-- ``` -->
+<!-- # Modele 4 -->
+<!-- ```{r Modeling4, message=FALSE, warning=FALSE} -->
+<!-- system.time({mod_gam4 = gam(accident  ~ -->
+<!--                               s(class1_speed, k = 12) +  -->
+<!--                              s(DISTANCE_VIOLATIONS, k = 12) + -->
+<!--                              # s(police_enforcment, k = 12) + -->
+<!--                              s(JMONTH) + -->
+<!--                              s(avg_class2_speed, k = 12) + -->
+<!--                              s(avg_class3_speed, k = 12) + -->
+<!--                              # ti(class4, TAG, bs = 'fs') + -->
+<!--                              ti(class2_speed, class2, k = 12) + -->
+<!--                              ti(class3_speed, class3, k = 12) + -->
+<!--                              s(DISTANCE_VIOLATIONS, class4, k = 12) + -->
+<!--                              # ti(HEAVY_VEHICLES, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              s(police_enforcment, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              ti(police_enforcment, JMONTH, bs = 'fs') -->
+<!--                            ,data = df, select = T, family = 'poisson') -->
+<!-- beepr::beep(2) -->
+<!-- }) -->
+<!-- summary(mod_gam4) -->
+<!-- # plot_gam_check(mod_gam4, scatter = TRUE) -->
+<!-- ``` -->
+<!-- # Modele 5 -->
+<!-- ```{r Modelin5, message=FALSE, warning=FALSE} -->
+<!-- system.time({mod_gam5 = gam(accident  ~ -->
+<!--                               s(class1_speed, k = 12) +  -->
+<!--                              s(DISTANCE_VIOLATIONS, k = 12) + -->
+<!--                              # s(police_enforcment, k = 12) + -->
+<!--                              s(JMONTH) + -->
+<!--                              s(avg_class2_speed, k = 12) + -->
+<!--                              s(avg_class3_speed, k = 12) + -->
+<!--                              # ti(class4, TAG, bs = 'fs') + -->
+<!--                              ti(class2_speed, class2, k = 12) + -->
+<!--                              ti(class3_speed, class3, k = 12) + -->
+<!--                              # s(DISTANCE_VIOLATIONS, class2, k = 12) + -->
+<!--                              s(DISTANCE_VIOLATIONS, class4, k = 12) + -->
+<!--                              # ti(HEAVY_VEHICLES, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              s(police_enforcment, IS_HOLIDAY, bs = 'fs') + -->
+<!--                              ti(police_enforcment, JMONTH, bs = 'fs') -->
+<!--                            ,data = df, select = T, family = 'poisson') -->
+<!-- beepr::beep(5) -->
+<!-- }) -->
+<!-- summary(mod_gam5) -->
+<!-- # plot_gam_check(mod_gam5, scatter = TRUE) -->
+<!-- ``` -->
+
+
+```{r plot.1}
+# AIC(mod_gam, mod_gam2, mod_gam3, mod_gam4, mod_gam5)
+plot_gam_3d(
+   model      = mod_gam,
+   main_var   = SPEED_VIOLATIONS,
+   # main_var   = SPEED_VIOLATIONS,
+   second_var = DISTANCE_VIOLATIONS,
+   palette    = 'davos',
+   direction  = 1
+)
+```
+
+
+### Model checking
+```{r gam_check, fig.show='hide'}
+test = capture.output(gam.check(mod_gam, k.rep = 1000))
+cat(paste0(test, collapse = '\n'))
+```
+```{r gam_check2, fig.asp=.75}
+plot_gam_check(mod_gam, scatter = TRUE)
+```
+
+
+
+<!-- ### Concurvity -->
+
+<!-- ```{r concurvity} -->
+<!-- knitr::kable(concurvity(mod_gam) %>% -->
+<!--   as_tibble(rownames = 'type')) -->
+<!-- ``` -->
